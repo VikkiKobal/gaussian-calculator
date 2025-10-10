@@ -15,6 +15,7 @@ const GaussianCalculator = () => {
   const [conditionData, setConditionData] = useState([]);
   const [deviationData, setDeviationData] = useState([]);
   const [nParam, setNParam] = useState(5);
+  const [iterations, setIterations] = useState([]);
 
   const generateMatrix = () => {
     const n = nParam;
@@ -31,7 +32,7 @@ const GaussianCalculator = () => {
     setVector(newVector);
   };
 
-  const gaussianElimination = (A, b) => {
+  const gaussianElimination = (A, b, saveSteps = false) => {
     const n = A.length;
     const augmented = [];
     for (let i = 0; i < n; i++) {
@@ -40,6 +41,16 @@ const GaussianCalculator = () => {
         augmented[i][j] = Number(A[i][j]);
       }
       augmented[i][n] = Number(b[i]);
+    }
+
+    const steps = [];
+
+    if (saveSteps) {
+      steps.push({
+        step: 0,
+        description: "Початкова розширена матриця",
+        matrix: augmented.map(row => [...row])
+      });
     }
 
     let det = 1;
@@ -61,6 +72,14 @@ const GaussianCalculator = () => {
         augmented[col] = augmented[maxRow];
         augmented[maxRow] = temp;
         swaps++;
+
+        if (saveSteps) {
+          steps.push({
+            step: steps.length,
+            description: `Обмін рядків ${col + 1} та ${maxRow + 1}`,
+            matrix: augmented.map(row => [...row])
+          });
+        }
       }
 
       if (Math.abs(augmented[col][col]) < 1e-10) {
@@ -75,6 +94,14 @@ const GaussianCalculator = () => {
           augmented[row][j] -= factor * augmented[col][j];
         }
       }
+
+      if (saveSteps) {
+        steps.push({
+          step: steps.length,
+          description: `Прямий хід: обнулення стовпця ${col + 1}`,
+          matrix: augmented.map(row => [...row])
+        });
+      }
     }
 
     det *= (swaps % 2 === 0 ? 1 : -1);
@@ -86,9 +113,18 @@ const GaussianCalculator = () => {
         sum -= augmented[i][j] * x[j];
       }
       x[i] = sum / augmented[i][i];
+
+      if (saveSteps) {
+        steps.push({
+          step: steps.length,
+          description: `Зворотній хід: обчислення x${i + 1} = ${x[i].toFixed(6)}`,
+          matrix: augmented.map(row => [...row]),
+          solution: [...x]
+        });
+      }
     }
 
-    return { solution: x, determinant: det, augmented };
+    return { solution: x, determinant: det, augmented, steps };
   };
 
   const calculateInverse = (A) => {
@@ -100,7 +136,7 @@ const GaussianCalculator = () => {
     const inverse = Array(n).fill().map(() => Array(n).fill(0));
 
     for (let col = 0; col < n; col++) {
-      const result = gaussianElimination(A, identity.map(row => row[col]));
+      const result = gaussianElimination(A, identity.map(row => row[col]), false);
       if (result.error) return null;
       for (let row = 0; row < n; row++) {
         inverse[row][col] = result.solution[row];
@@ -130,7 +166,7 @@ const GaussianCalculator = () => {
         return;
       }
 
-      const gaussResult = gaussianElimination(A, b);
+      const gaussResult = gaussianElimination(A, b, true);
       if (gaussResult.error) {
         setResult({ error: gaussResult.error });
         return;
@@ -139,6 +175,7 @@ const GaussianCalculator = () => {
       const inverse = calculateInverse(A);
       const cond = inverse ? conditionNumber(A, inverse) : null;
 
+      setIterations(gaussResult.steps || []);
       setResult({
         solution: gaussResult.solution,
         determinant: gaussResult.determinant,
@@ -164,7 +201,7 @@ const GaussianCalculator = () => {
         row.reduce((sum, val, j) => sum + val * exactSolution[j], 0)
       );
 
-      const gaussResult = gaussianElimination(A, b);
+      const gaussResult = gaussianElimination(A, b, false);
 
       if (!gaussResult.error) {
         const approximateSolution = gaussResult.solution;
@@ -185,7 +222,6 @@ const GaussianCalculator = () => {
     setDeviationData(devData);
   };
 
-
   const updateMatrixCell = (i, j, value) => {
     const newMatrix = [...matrix];
     newMatrix[i][j] = value;
@@ -204,6 +240,7 @@ const GaussianCalculator = () => {
     setMatrix(Array(n).fill().map(() => Array(n).fill('')));
     setVector(Array(n).fill(''));
     setResult(null);
+    setIterations([]);
   };
 
   return (
@@ -305,6 +342,42 @@ const GaussianCalculator = () => {
           </div>
         </div>
 
+        {iterations.length > 0 && (
+          <div className="bg-white rounded-lg shadow-xl p-6 mb-6">
+            <h2 className="text-2xl font-bold mb-4 text-gray-800">Ітерації методу Гаусса:</h2>
+            <div className="space-y-6">
+              {iterations.map((iter, idx) => (
+                <div key={idx} className="border-b pb-4 last:border-b-0">
+                  <h3 className="text-lg font-semibold mb-2 text-indigo-600">
+                    Крок {iter.step}: {iter.description}
+                  </h3>
+                  <div className="bg-gray-50 p-4 rounded overflow-x-auto">
+                    <div className="font-mono text-sm">
+                      {iter.matrix.map((row, i) => (
+                        <div key={i} className="flex gap-3 mb-1">
+                          {row.map((val, j) => (
+                            <span
+                              key={j}
+                              className={`w-20 text-right ${j === row.length - 1 ? 'border-l-2 border-indigo-300 pl-2' : ''}`}
+                            >
+                              {val.toFixed(4)}
+                            </span>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  {iter.solution && (
+                    <div className="mt-2 text-sm text-gray-600">
+                      Поточний розв'язок: [{iter.solution.map(x => x.toFixed(4)).join(', ')}]
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {result && !result.error && (
           <div className="bg-white rounded-lg shadow-xl p-6 mb-6">
             <h2 className="text-2xl font-bold mb-4 text-gray-800">Результати:</h2>
@@ -325,7 +398,7 @@ const GaussianCalculator = () => {
                 <h3 className="text-lg font-semibold mb-2">Характеристики:</h3>
                 <div className="bg-gray-50 p-4 rounded space-y-2">
                   <div>
-                    <strong>Визначник:</strong> {result.determinant.toFixed(6)}
+                    <strong>Визначник:</strong> {result.determinant.toFixed(50)}
                   </div>
                   {result.conditionNumber && (
                     <div>
@@ -398,7 +471,7 @@ const GaussianCalculator = () => {
                 <YAxis label={{ angle: -90, position: 'insideLeft' }} />
                 <Tooltip />
                 <Legend />
-                <Line type="monotone" dataKey="deviationNum" stroke="#ef4444" strokeWidth={2} name="||x_точне - x_наближене||" />
+                <Line type="monotone" dataKey="deviation" stroke="#ef4444" strokeWidth={2} name="||x_точне - x_наближене||" />
               </LineChart>
             </ResponsiveContainer>
           </div>
