@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Calculator, Play, RefreshCw, Shuffle } from 'lucide-react';
+import { Calculator, Play, RefreshCw, Shuffle, Info } from 'lucide-react';
 
 const LinearSystemSolver = () => {
   const [n, setN] = useState(4);
@@ -12,17 +12,29 @@ const LinearSystemSolver = () => {
   const [vector, setVector] = useState([18, 14, 17, 21]);
   const [epsilon, setEpsilon] = useState(0.001);
   const [omega, setOmega] = useState(1.2);
+  const [omegaRange, setOmegaRange] = useState({ min: 0.5, max: 1.9, step: 0.1 });
   const [results, setResults] = useState(null);
+  const [omegaStudy, setOmegaStudy] = useState(null);
 
   const updateMatrix = (i, j, value) => {
     const newMatrix = matrix.map(row => [...row]);
-    newMatrix[i][j] = parseFloat(value) || 0;
+    if (value === '' || value === '-') {
+      newMatrix[i][j] = value;
+    } else {
+      const parsed = parseFloat(value);
+      newMatrix[i][j] = isNaN(parsed) ? 0 : parsed;
+    }
     setMatrix(newMatrix);
   };
 
   const updateVector = (i, value) => {
     const newVector = [...vector];
-    newVector[i] = parseFloat(value) || 0;
+    if (value === '' || value === '-') {
+      newVector[i] = value;
+    } else {
+      const parsed = parseFloat(value);
+      newVector[i] = isNaN(parsed) ? 0 : parsed;
+    }
     setVector(newVector);
   };
 
@@ -32,6 +44,7 @@ const LinearSystemSolver = () => {
     setMatrix(Array.from({ length: size }, () => Array(size).fill(0)));
     setVector(Array(size).fill(0));
     setResults(null);
+    setOmegaStudy(null);
   };
 
   const generateRandom = (n) => {
@@ -56,16 +69,30 @@ const LinearSystemSolver = () => {
     return { A, b };
   };
 
+  const rearrangeMatrix = (A, b) => {
+    const n = A.length;
+    const newA = A.map(row => [...row]);
+    const newB = [...b];
 
-  const checkDiagonalDominance = (A) => {
-    for (let i = 0; i < A.length; i++) {
-      let sum = 0;
-      for (let j = 0; j < A[i].length; j++) {
-        if (i !== j) sum += Math.abs(A[i][j]);
+    for (let i = 0; i < n; i++) {
+      let maxRow = i;
+      for (let k = i + 1; k < n; k++) {
+        if (Math.abs(newA[k][i]) > Math.abs(newA[maxRow][i])) {
+          maxRow = k;
+        }
       }
-      if (Math.abs(A[i][i]) <= sum) return false;
+
+      if (maxRow !== i) {
+        [newA[i], newA[maxRow]] = [newA[maxRow], newA[i]];
+        [newB[i], newB[maxRow]] = [newB[maxRow], newB[i]];
+      }
+
+      if (Math.abs(newA[i][i]) < 1e-12) {
+        return null;
+      }
     }
-    return true;
+
+    return { A: newA, b: newB };
   };
 
   const jacobiMethod = (A, b, eps) => {
@@ -79,19 +106,19 @@ const LinearSystemSolver = () => {
       for (let i = 0; i < n; i++) {
         let sum = 0;
         for (let j = 0; j < n; j++) {
-          if (i !== j) sum += A[i][j] * x[j];
+          if (j !== i) sum += A[i][j] * x[j];
         }
         xNew[i] = (b[i] - sum) / A[i][i];
       }
 
-      let error = xNew.reduce((acc, xi, i) => acc + Math.abs(xi - x[i]), 0);
+      const error = Math.max(...xNew.map((xi, i) => Math.abs(xi - x[i])));
       x = [...xNew];
       iter++;
 
       if (error < eps) break;
     }
 
-    return { solution: x, iterations: iter };
+    return { solution: x, iterations: iter, converged: iter < maxIter };
   };
 
   const seidelMethod = (A, b, eps) => {
@@ -102,55 +129,58 @@ const LinearSystemSolver = () => {
 
     while (iter < maxIter) {
       const xOld = [...x];
+
       for (let i = 0; i < n; i++) {
-        let sum = 0;
-        for (let j = 0; j < n; j++) {
-          if (i !== j) sum += A[i][j] * x[j];
-        }
-        x[i] = (b[i] - sum) / A[i][i];
+        let sum1 = 0, sum2 = 0;
+        for (let j = 0; j < i; j++) sum1 += A[i][j] * x[j];
+        for (let j = i + 1; j < n; j++) sum2 += A[i][j] * xOld[j];
+
+        x[i] = (b[i] - sum1 - sum2) / A[i][i];
       }
 
-      const error = x.reduce((acc, xi, i) => acc + Math.abs(xi - xOld[i]), 0);
+      const error = Math.max(...x.map((xi, i) => Math.abs(xi - xOld[i])));
       iter++;
       if (error < eps) break;
     }
 
-    return { solution: x, iterations: iter };
+    return { solution: x, iterations: iter, converged: iter < maxIter };
   };
 
   const simpleIterationMethod = (A, b, eps) => {
     const n = A.length;
+    let x = new Array(n).fill(0);
+    let iter = 0;
+    const maxIter = 10000;
+
     const alpha = Array.from({ length: n }, () => Array(n).fill(0));
-    const beta = Array(n).fill(0);
+    const beta = new Array(n).fill(0);
 
     for (let i = 0; i < n; i++) {
       for (let j = 0; j < n; j++) {
-        alpha[i][j] = i === j ? 0 : -A[i][j] / A[i][i];
+        if (i !== j) alpha[i][j] = -A[i][j] / A[i][i];
       }
       beta[i] = b[i] / A[i][i];
     }
 
-    let x = [...beta];
-    let iter = 0;
-    const maxIter = 10000;
-
     while (iter < maxIter) {
-      let xNew = Array(n).fill(0);
+      const xNew = Array(n).fill(0);
       for (let i = 0; i < n; i++) {
-        xNew[i] = beta[i] + alpha[i].reduce((acc, aij, j) => acc + aij * x[j], 0);
+        xNew[i] = beta[i];
+        for (let j = 0; j < n; j++) {
+          xNew[i] += alpha[i][j] * x[j];
+        }
       }
 
-      const error = xNew.reduce((acc, xi, i) => acc + Math.abs(xi - x[i]), 0);
-      x = xNew;
+      const error = Math.max(...xNew.map((xi, i) => Math.abs(xi - x[i])));
+      x = [...xNew];
       iter++;
-
       if (error < eps) break;
     }
 
-    return { solution: x, iterations: iter };
+    return { solution: x, iterations: iter, converged: iter < maxIter };
   };
 
-  const sorMethod = (A, b, eps, w) => {
+  const sorMethod = (A, b, eps, omega) => {
     const n = A.length;
     let x = Array(n).fill(0);
     let iter = 0;
@@ -158,33 +188,71 @@ const LinearSystemSolver = () => {
 
     while (iter < maxIter) {
       const xOld = [...x];
+
       for (let i = 0; i < n; i++) {
-        let sum = 0;
-        for (let j = 0; j < n; j++) {
-          if (i !== j) sum += A[i][j] * x[j];
-        }
-        x[i] = (1 - w) * x[i] + (w / A[i][i]) * (b[i] - sum);
+        let sum1 = 0, sum2 = 0;
+        for (let j = 0; j < i; j++) sum1 += A[i][j] * x[j];
+        for (let j = i + 1; j < n; j++) sum2 += A[i][j] * xOld[j];
+
+        const xGaussSeidel = (b[i] - sum1 - sum2) / A[i][i];
+        x[i] = (1 - omega) * xOld[i] + omega * xGaussSeidel;
       }
 
-      const error = x.reduce((acc, xi, i) => acc + Math.abs(xi - xOld[i]), 0);
+      const error = Math.max(...x.map((xi, i) => Math.abs(xi - xOld[i])));
       iter++;
       if (error < eps) break;
     }
 
-    return { solution: x, iterations: iter };
+    return { solution: x, iterations: iter, converged: iter < maxIter };
   };
 
   const solve = () => {
-    if (!checkDiagonalDominance(matrix)) {
-      alert('Матриця не має діагональної переваги!');
+    let workMatrix = matrix.map(row => [...row]);
+    let workVector = [...vector];
+
+    const rearranged = rearrangeMatrix(workMatrix, workVector);
+
+    if (rearranged === null) {
+      alert('Неможливо переставити рядки так, щоб уникнути нулів на діагоналі! Система може бути виродженою.');
+      return;
     }
 
-    const jacobi = jacobiMethod(matrix, vector, epsilon);
-    const seidel = seidelMethod(matrix, vector, epsilon);
-    const simple = simpleIterationMethod(matrix, vector, epsilon);
-    const sor = sorMethod(matrix, vector, epsilon, omega);
+    workMatrix = rearranged.A;
+    workVector = rearranged.b;
+
+    const jacobi = jacobiMethod(workMatrix, workVector, epsilon);
+    const seidel = seidelMethod(workMatrix, workVector, epsilon);
+    const simple = simpleIterationMethod(workMatrix, workVector, epsilon);
+    const sor = sorMethod(workMatrix, workVector, epsilon, omega);
 
     setResults({ jacobi, seidel, simple, sor });
+  };
+
+  const studyOmega = () => {
+    let workMatrix = matrix.map(row => [...row]);
+    let workVector = [...vector];
+
+    const rearranged = rearrangeMatrix(workMatrix, workVector);
+
+    if (rearranged === null) {
+      alert('Неможливо переставити рядки так, щоб уникнути нулів на діагоналі!');
+      return;
+    }
+
+    workMatrix = rearranged.A;
+    workVector = rearranged.b;
+
+    const omegaValues = [];
+    for (let w = omegaRange.min; w <= omegaRange.max; w += omegaRange.step) {
+      const result = sorMethod(workMatrix, workVector, epsilon, w);
+      omegaValues.push({
+        omega: parseFloat(w.toFixed(2)),
+        iterations: result.iterations,
+        converged: result.converged
+      });
+    }
+
+    setOmegaStudy(omegaValues);
   };
 
   const resetExample = () => {
@@ -199,6 +267,7 @@ const LinearSystemSolver = () => {
     setEpsilon(0.001);
     setOmega(1.2);
     setResults(null);
+    setOmegaStudy(null);
   };
 
   return (
@@ -207,12 +276,15 @@ const LinearSystemSolver = () => {
         <div className="bg-white rounded-xl shadow-2xl p-8">
           <div className="flex items-center gap-3 mb-6">
             <Calculator className="w-8 h-8 text-indigo-600" />
-            <h1 className="text-3xl font-bold text-gray-800">
-              Калькулятор ітераційних методів розв'язання СЛАР
-            </h1>
+            <div>
+              <h1 className="text-3xl font-bold text-gray-800">
+                Розв'язання СЛАР ітераційними методами
+              </h1>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3 mb-6">
+
+          <div className="flex flex-wrap items-center gap-3 mb-6">
             <label className="font-medium text-gray-700">Розмірність n:</label>
             <select
               value={n}
@@ -232,13 +304,13 @@ const LinearSystemSolver = () => {
                 setMatrix(A);
                 setVector(b);
                 setResults(null);
+                setOmegaStudy(null);
               }}
               className="flex items-center gap-2 bg-indigo-500 text-white px-4 py-2 rounded-lg hover:bg-indigo-600 transition"
             >
               <Shuffle className="w-5 h-5" />
-              Згенерувати коефіцієнти
+              Згенерувати систему
             </button>
-
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
@@ -252,7 +324,8 @@ const LinearSystemSolver = () => {
                     {row.map((val, j) => (
                       <input
                         key={j}
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
                         value={val}
                         onChange={(e) => updateMatrix(i, j, e.target.value)}
                         className="w-16 px-1 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
@@ -272,7 +345,8 @@ const LinearSystemSolver = () => {
                   {vector.map((val, i) => (
                     <input
                       key={i}
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       value={val}
                       onChange={(e) => updateVector(i, e.target.value)}
                       className="w-16 px-2 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
@@ -298,7 +372,7 @@ const LinearSystemSolver = () => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Параметр релаксації ω (для SOR)
+                      Параметр релаксації ω
                     </label>
                     <input
                       type="number"
@@ -313,13 +387,13 @@ const LinearSystemSolver = () => {
             </div>
           </div>
 
-          <div className="flex gap-4 mb-6">
+          <div className="flex gap-4 mb-6 flex-wrap">
             <button
               onClick={solve}
               className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 transition-colors font-semibold"
             >
               <Play className="w-5 h-5" />
-              Розв'язати
+              Розв'язати систему
             </button>
             <button
               onClick={resetExample}
@@ -331,8 +405,31 @@ const LinearSystemSolver = () => {
           </div>
 
           {results && (
-            <div className="bg-gradient-to-r from-indigo-50 to-blue-50 p-6 rounded-lg">
-              <h2 className="text-2xl font-bold mb-6 text-gray-800">Результати</h2>
+            <div className="bg-gradient-to-r from-indigo-50 to-blue-50 p-6 rounded-lg mb-6">
+              <h2 className="text-2xl font-bold mb-6 text-gray-800">Результати розв'язання</h2>
+
+              <div className="bg-white p-4 rounded-lg mb-6">
+                <h3 className="text-lg font-semibold mb-3 text-gray-700">Порівняння методів за кількістю ітерацій</h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="text-center">
+                    <p className="text-sm text-gray-600">Якобі</p>
+                    <p className="text-2xl font-bold text-indigo-600">{results.jacobi.iterations}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm text-gray-600">Зейделя</p>
+                    <p className="text-2xl font-bold text-indigo-600">{results.seidel.iterations}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm text-gray-600">Проста ітерація</p>
+                    <p className="text-2xl font-bold text-indigo-600">{results.simple.iterations}</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-sm text-gray-600">Метод верхньої релаксації (ω={omega})</p>
+                    <p className="text-2xl font-bold text-indigo-600">{results.sor.iterations}</p>
+                  </div>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {Object.entries(results).map(([method, data]) => (
                   <div key={method} className="bg-white p-4 rounded-lg shadow">
@@ -342,22 +439,127 @@ const LinearSystemSolver = () => {
                         : method === 'seidel'
                           ? 'Метод Зейделя'
                           : method === 'simple'
-                            ? 'Проста ітерація'
-                            : `Верхня релаксація (ω = ${omega})`}
+                            ? 'Метод простої ітерації'
+                            : `Метод верхньої релаксації (ω = ${omega})`}
                     </h3>
-                    <p className="text-sm text-gray-600 mb-2">
-                      Ітерацій: {data.iterations}
+                    <p className="text-sm text-gray-600 mb-3">
+                      Кількість ітерацій: <strong>{data.iterations}</strong>
+                      {!data.converged && <span className="text-red-600"> (не збіглося)</span>}
                     </p>
-                    {data.solution.map((x, i) => (
-                      <p key={i} className="text-sm">
-                        x<sub>{i + 1}</sub> = {x.toFixed(6)}
-                      </p>
-                    ))}
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {data.solution.map((x, i) => (
+                        <p key={i} className="text-sm font-mono">
+                          x<sub>{i + 1}</sub> = {x.toFixed(8)}
+                        </p>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
           )}
+
+          <div className="border-t pt-6 mt-6">
+            <h2 className="text-2xl font-bold mb-4 text-gray-800">Дослідження параметра ω для методу верхньої релаксації</h2>
+
+            <div className="bg-gray-50 p-6 rounded-lg mb-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    ω мін
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={omegaRange.min}
+                    onChange={(e) => setOmegaRange({ ...omegaRange, min: parseFloat(e.target.value) })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    ω макс
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    value={omegaRange.max}
+                    onChange={(e) => setOmegaRange({ ...omegaRange, max: parseFloat(e.target.value) })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Крок
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={omegaRange.step}
+                    onChange={(e) => setOmegaRange({ ...omegaRange, step: parseFloat(e.target.value) })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded focus:ring-2 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={studyOmega}
+              className="flex items-center gap-2 bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors font-semibold mb-6"
+            >
+              <Calculator className="w-5 h-5" />
+              Дослідити вплив параметра ω
+            </button>
+
+            {omegaStudy && (
+              <div className="bg-gradient-to-r from-green-50 to-teal-50 p-6 rounded-lg">
+                <h3 className="text-xl font-bold mb-4 text-gray-800">Результати дослідження</h3>
+
+                <div className="bg-white p-4 rounded-lg mb-4">
+                  <p className="text-sm text-gray-700 mb-2">
+                    <strong>Оптимальний параметр ω:</strong> {
+                      omegaStudy.reduce((best, curr) =>
+                        curr.iterations < best.iterations ? curr : best
+                      ).omega
+                    } ({
+                      omegaStudy.reduce((best, curr) =>
+                        curr.iterations < best.iterations ? curr : best
+                      ).iterations
+                    } ітерацій)
+                  </p>
+                </div>
+
+                <div className="bg-white p-4 rounded-lg overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b-2">
+                        <th className="text-left p-2">ω</th>
+                        <th className="text-left p-2">Кількість ітерацій</th>
+                        <th className="text-left p-2">Збіжність</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {omegaStudy.map((data, idx) => (
+                        <tr key={idx} className={`border-b ${data.iterations === Math.min(...omegaStudy.map(d => d.iterations))
+                          ? 'bg-green-50 font-bold'
+                          : ''
+                          }`}>
+                          <td className="p-2">{data.omega.toFixed(2)}</td>
+                          <td className="p-2">{data.iterations}</td>
+                          <td className="p-2">
+                            {data.converged
+                              ? <span className="text-green-600">✓ Так</span>
+                              : <span className="text-red-600">✗ Ні</span>
+                            }
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
